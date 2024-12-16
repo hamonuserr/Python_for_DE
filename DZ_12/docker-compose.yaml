@@ -1,0 +1,80 @@
+services:
+
+  jupyter:
+    image: jupyter/pyspark-notebook:latest
+    container_name: jupyter-spark
+    ports:
+      - "8888:8888"  
+    volumes:
+      - ./notebooks:/home/jovyan/work  
+    environment:
+      - JUPYTER_ENABLE_LAB=yes  
+
+  postgres:
+    container_name: postgres
+    image: postgres
+    environment:
+      POSTGRES_USER: 'login'
+      POSTGRES_PASSWORD: 'pass'
+      POSTGRES_DB: 'db-name'
+    ports:
+      - '5432:5432'
+    volumes:
+      - ./migrations/create_and_inser_data.sql:/docker-entrypoint-initdb.d/create_and_inser_data.sql
+
+  kafka:
+    image: bitnami/kafka:3.9
+    ports:
+      - '9092:9092'
+      - '9094:9094'
+    environment:
+      KAFKA_CFG_NODE_ID: 0
+      KAFKA_CFG_PROCESS_ROLES: 'controller,broker'
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '0@kafka:9093'
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_CFG_LISTENERS: 'PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094'
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094'
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+
+  kafka-init:
+    image: bitnami/kafka:3.9
+    command: |
+      kafka-topics.sh --create --bootstrap-server kafka:9092 --topic transactions --partitions 1 --replication-factor 1 && kafka-topics.sh --create --bootstrap-server kafka:9092 --topic suspicious 
+    depends_on:
+      - kafka
+
+  kafka-init-2:
+    image: bitnami/kafka:3.9
+    command: |
+      kafka-topics.sh --create --bootstrap-server kafka:9092 --topic suspicious 
+    depends_on:
+      - kafka
+
+  producer:
+    build: ./internal/producer
+    depends_on:
+      - kafka
+
+
+  # consumer:
+  #   build: ./internal/consumer
+  #   depends_on:
+  #     - kafka
+  #     - spark
+
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui
+    container_name: kafka-ui
+    ports:
+      - '8383:8383'
+    restart: always
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+      - SERVER_PORT=8383
+    depends_on:
+      - kafka
+    links:
+      - kafka
